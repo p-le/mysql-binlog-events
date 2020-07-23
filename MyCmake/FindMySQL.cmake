@@ -1,17 +1,33 @@
-#   Copyright (c) 20014, 2015, Oracle and/or its affiliates. All rights reserved.
+# -*- indent-tabs-mode:nil; -*-
+# vim: set expandtab:
 #
-#   This program is free software; you can redistribute it and/or modify
-#   it under the terms of the GNU General Public License as published
-#   by the Free Software Foundation; version 2 of the License.
+# Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved. 
+# 
+# This program is free software; you can redistribute it and/or modify 
+# it under the terms of the GNU General Public License, version 2.0, as 
+# published by the Free Software Foundation. 
 #
-#   This program is distributed in the hope that it will be useful, but
-#   WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-#   or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
-#   for more details.
-#
-#   You should have received a copy of the GNU General Public License along
-#   with this program; if not, write to the Free Software Foundation, Inc.,
-#   51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
+# This program is also distributed with certain software (including 
+# but not limited to OpenSSL) that is licensed under separate terms, 
+# as designated in a particular file or component or in included license 
+# documentation. The authors of MySQL hereby grant you an 
+# additional permission to link the program and your derivative works 
+# with the separately licensed software that they have included with 
+# MySQL. 
+# 
+# Without limiting anything contained in the foregoing, this file, 
+# which is part of MySQL Connector/ODBC, is also subject to the 
+# Universal FOSS Exception, version 1.0, a copy of which can be found at 
+# http://oss.oracle.com/licenses/universal-foss-exception. 
+# 
+# This program is distributed in the hope that it will be useful, but 
+# WITHOUT ANY WARRANTY; without even the implied warranty of 
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+# See the GNU General Public License, version 2.0, for more details. 
+# 
+# You should have received a copy of the GNU General Public License 
+# along with this program; if not, write to the Free Software Foundation, Inc., 
+# 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA 
 
 ##########################################################################
 
@@ -52,10 +68,12 @@
 # In addition, the below CMake variables are set by this include file
 #
 #   MYSQL_VERSION     - Three position numeric version, like 5.6.41
-#   MYSQL_NUM_VERSION - Numeric padded version, 5.13.4 => 51304
+#   MYSQL_VERSION_ID  - Numeric padded version, 5.13.4 => 51304
+#   MYSQL_NUM_VERSION - Same as MYSQL_VERSION_ID, for compatibility
 #   MYSQL_LIB         - Path to the client library
 #   MYSQL_LIBRARIES   - Library name, might be "-lmysqlclient" while
 #                       MYSQL_LIB is the path to the library
+#   MYSQL_CLIENT_LIBS - Same as MYSQL_LIBRARIES, for compatibility
 #
 # (1) If MYSQL_INCLUDE_DIR or MYSQL_LIB_DIR are given, these are
 #     used and an error is reported if can't be used
@@ -80,8 +98,9 @@
 # FIXME cache variables, makes them command line args?
 # FIXME really do include_directories() and link_directories()? Likely
 # FIXME add check that if not static, not picked up .a or mysqlclient.lib
-# FIXME MYSQL_NUM_VERSION need to take into account Cluster versions
+# FIXME MYSQL_VERSION_ID need to take into account Cluster versions
 #       and Connector/C versions
+# FIXME handle MYSQL_VERSION_ID, LIBMYSQL_VERSION and LIBMYSQL_VERSION_ID?
 #
 ##########################################################################
 
@@ -99,6 +118,7 @@ set(ENV_OR_OPT_VARS
   MYSQL_DIR
   MYSQL_INCLUDE_DIR
   MYSQL_LIB_DIR
+  MYSQL_LIB_DIR_LIST
   MYSQL_CFLAGS
   MYSQL_CXXFLAGS
   MYSQL_CONFIG_EXECUTABLE
@@ -330,6 +350,9 @@ macro(_mysql_config _var _regex _opt)
   _mysql_conf(_mysql_config_output ${_opt})
   string(REGEX MATCHALL "${_regex}([^ ]+)" _mysql_config_output "${_mysql_config_output}")
   string(REGEX REPLACE "^[ \t]+" "" _mysql_config_output "${_mysql_config_output}")
+  IF(CMAKE_SYSTEM_NAME MATCHES "SunOS")
+    string(REGEX REPLACE " -latomic" "" _mysql_config_output "${_mysql_config_output}")
+  ENDIF()
   string(REGEX REPLACE "${_regex}" "" _mysql_config_output "${_mysql_config_output}")
   separate_arguments(_mysql_config_output)
   set(${_var} ${_mysql_config_output})
@@ -355,6 +378,9 @@ macro(_mysql_config_replace _var _regex1 _replace _regex2 _opt)
   _mysql_conf(_mysql_config_output ${_opt})
   string(REGEX MATCHALL "${_regex2}([^ ]+)" _mysql_config_output "${_mysql_config_output}")
   string(REGEX REPLACE "^[ \t]+" "" _mysql_config_output "${_mysql_config_output}")
+  IF(CMAKE_SYSTEM_NAME MATCHES "SunOS")
+    string(REGEX REPLACE " -latomic" "" _mysql_config_output "${_mysql_config_output}")
+  ENDIF()
   string(REGEX REPLACE "${_regex2}" "" _mysql_config_output "${_mysql_config_output}")
   string(REGEX REPLACE "${_regex1}" "${_replace}" _mysql_config_output "${_mysql_config_output}")
   separate_arguments(_mysql_config_output)
@@ -424,52 +450,7 @@ if(NOT WIN32)
   if(MYSQL_CONFIG_EXECUTABLE)
     message(STATUS "mysql_config was found ${MYSQL_CONFIG_EXECUTABLE}")
 
-    _mysql_conf(_mysql_version "--version")
-
-    # Clean up so only numeric, in case of "-alpha" or similar
-    string(REGEX MATCHALL "([0-9]+.[0-9]+.[0-9]+)" MYSQL_VERSION "${_mysql_version}")
-    # To create a fully numeric version, first normalize so N.NN.NN
-    string(REGEX REPLACE "[.]([0-9])[.]" ".0\\1." MYSQL_NUM_VERSION "${MYSQL_VERSION}")
-    string(REGEX REPLACE "[.]([0-9])$"   ".0\\1"  MYSQL_NUM_VERSION "${MYSQL_NUM_VERSION}")
-    # Finally remove the dot
-    string(REGEX REPLACE "[.]" "" MYSQL_NUM_VERSION "${MYSQL_NUM_VERSION}")
-  endif()
-
-endif()
-
-##########################################################################
-#
-# Try determine if to use C++ linkage, and also find C++ flags
-#
-##########################################################################
-
-if(NOT WIN32)
-
-  if(MYSQL_CONFIG_EXECUTABLE)
-
-    if(NOT MYSQL_CFLAGS)
-      _mysql_conf(MYSQL_CFLAGS "--cflags")
-    endif()
-
-    if(NOT MYSQL_CXXFLAGS)
-      if(MYSQL_CXX_LINKAGE OR MYSQL_NUM_VERSION GREATER 50603)
-        _mysql_conf(MYSQL_CXXFLAGS "--cxxflags")
-        set(MYSQL_CXX_LINKAGE 1)
-      else()
-        set(MYSQL_CXXFLAGS "${MYSQL_CFLAGS}")
-      endif()
-    endif()
-
-# FIXME this should not be needed, caller of this module should set
-#       it's own flags and just use the library on it's on terms
-#       (change the infe message if enabling this code)
-#   if(NOT MYSQL_LINK_FLAGS)
-#     # Find -mcpu -march -mt -m32 -m64 and other flags starting with "-m"
-#     string(REGEX MATCHALL "(^| )-m([^\r\n ]+)" MYSQL_LINK_FLAGS "${MYSQL_CXXFLAGS}")
-#     string(REGEX REPLACE "^ " ""  MYSQL_LINK_FLAGS "${MYSQL_LINK_FLAGS}")
-#     string(REGEX REPLACE "; " ";" MYSQL_LINK_FLAGS "${MYSQL_LINK_FLAGS}")
-#   endif()
-
+    _mysql_conf(MYSQL_VERSION "--version")
   endif()
 
 endif()
@@ -540,14 +521,12 @@ else()
   endif()
 
   # No specific paths, try some common install paths
-  find_path(_found_header mysql.h ${_include_fallback_path})
+  find_path(MYSQL_INCLUDE_DIR mysql.h ${_include_fallback_path})
 
-  if(NOT _found_header)
+  if(NOT MYSQL_INCLUDE_DIR)
     message(FATAL_ERROR "Could not find \"mysql.h\" from searching "
                         "\"${_pp_include_fallback_path}\"")
   endif()
-
-  get_filename_component(MYSQL_INCLUDE_DIR ${_found_header} PATH)
 
 endif()
 
@@ -575,7 +554,7 @@ if(MYSQL_LIB_DIR)
     NAMES
       ${_search_libs}
     PATHS
-      ${MYSQL_LIB_DIR}
+      "${MYSQL_LIB_DIR}"
     NO_DEFAULT_PATH
   )
   _check_lib_search_error(MYSQL_LIB_DIR MYSQL_LIB "")
@@ -594,14 +573,14 @@ elseif(MYSQL_DIR AND
     NAMES
       ${_search_libs}
     PATHS
-      ${MYSQL_DIR}
+      "${MYSQL_DIR}"
     PATH_SUFFIXES
       ${_lib_subdirs}
     NO_DEFAULT_PATH
   )
   _check_lib_search_error(MYSQL_DIR MYSQL_LIB "in \"${_pp_lib_subdirs}\"")
-  get_filename_component(MYSQL_LIB_DIR ${MYSQL_LIB} PATH)
-  set(MYSQL_LIBRARIES ${MYSQL_LIB})
+  get_filename_component(MYSQL_LIB_DIR "${MYSQL_LIB}" PATH)
+  set(MYSQL_LIBRARIES "${MYSQL_LIB}")
 
 elseif(MYSQL_CONFIG_EXECUTABLE)
 
@@ -612,13 +591,29 @@ elseif(MYSQL_CONFIG_EXECUTABLE)
   # This code assumes there is just one "-L...." and that
   # no space between "-L" and the path
   _mysql_config(MYSQL_LIB_DIR "(^| )-L" "--libs")
+
+  IF(CMAKE_SYSTEM_NAME MATCHES "SunOS")
+    # This is needed to make Solaris binaries using the default runtime lib path
+    _mysql_config(DEV_STUDIO_RUNTIME_DIR "(^| )-R" "--libs")
+  ENDIF()
+
+
+  # In case mysql_config returns several paths: libmysqlclient is last
+  LIST(LENGTH MYSQL_LIB_DIR n)
+  IF( ${n} GREATER 1)
+    #copy list of directories
+    SET(MYSQL_LIB_DIR_LIST ${MYSQL_LIB_DIR})
+
+    MATH(EXPR ind "${n}-1")
+    LIST(GET MYSQL_LIB_DIR ${ind} MYSQL_LIB_DIR)
+  ENDIF()
   if(NOT MYSQL_LIB_DIR)
     message(FATAL_ERROR "Could not find the library dir from running "
                         "\"${MYSQL_CONFIG_EXECUTABLE}\"")
   endif()
 
   if(NOT EXISTS "${MYSQL_LIB_DIR}")
-    message(FATAL_ERROR "Could not find the directory \"${MYSQL_INCLUDE_DIR}\" "
+    message(FATAL_ERROR "Could not find the directory \"${MYSQL_LIB_DIR}\" "
                         "found from running \"${MYSQL_CONFIG_EXECUTABLE}\"")
   endif()
 
@@ -641,7 +636,7 @@ elseif(MYSQL_CONFIG_EXECUTABLE)
     _check_lib_search_error(MYSQL_LIB_DIR MYSQL_LIB "in \"${_static_subdirs}\"")
 
     # Adjust MYSQL_LIB_DIR in case it changes
-    get_filename_component(MYSQL_LIB_DIR ${MYSQL_LIB} PATH)
+    get_filename_component(MYSQL_LIB_DIR "${MYSQL_LIB}" PATH)
 
     # Replace the current library references with the full path
     # to the library, i.e. the -L will be ignored
@@ -651,9 +646,14 @@ elseif(MYSQL_CONFIG_EXECUTABLE)
   else()
 
     _mysql_config(MYSQL_LIBRARIES "(^| )-l" "--libs")
-
+    FOREACH(__lib IN LISTS MYSQL_LIBRARIES)
+      string(REGEX MATCH "mysqlclient([^ ]*)" _matched_lib __lib)
+      IF(_matched_lib)
+        set(_search_libs ${matched_lib})
+      ENDIF()
+    ENDFOREACH()
     # First library is assumed to be the client library
-    list(GET MYSQL_LIBRARIES 0 _search_libs)
+    # list(GET MYSQL_LIBRARIES 0 _search_libs)
     find_library(MYSQL_LIB
       NAMES
         ${_search_libs}
@@ -684,7 +684,7 @@ else()
                         "\"${_pp_lib_fallback_path}\"")
   endif()
 
-  get_filename_component(MYSQL_LIB_DIR ${MYSQL_LIB} PATH)
+  get_filename_component(MYSQL_LIB_DIR "${MYSQL_LIB}" PATH)
 
 endif()
 
@@ -695,9 +695,23 @@ endif()
 ##########################################################################
 
 # FIXME needed?!
-if(NOT WIN32 AND MYSQLCLIENT_STATIC_LINKING AND
+if(MYSQLCLIENT_STATIC_LINKING AND
+   NOT WIN32 AND
    NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   list(APPEND MYSQL_LIBRARIES "rt")
+endif()
+
+# For dynamic linking use the built-in sys and strings
+if(NOT MYSQLCLIENT_STATIC_LINKING)
+   list(APPEND SYS_LIBRARIES "mysql_sys")
+   list(APPEND SYS_LIBRARIES "mysql_strings")
+   list(APPEND SYS_LIBRARIES ${MYSQL_LIBRARIES})
+   SET(MYSQL_LIBRARIES ${SYS_LIBRARIES})
+
+#if(NOT MYSQLCLIENT_STATIC_LINKING AND ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+#  list(REVERSE MYSQL_LIBRARIES)
+#endif()
+
 endif()
 
 if(MYSQL_EXTRA_LIBRARIES)
@@ -705,9 +719,106 @@ if(MYSQL_EXTRA_LIBRARIES)
   list(APPEND MYSQL_LIBRARIES ${MYSQL_EXTRA_LIBRARIES})
 endif()
 
+# For compatibility
+SET(MYSQL_CLIENT_LIBS ${MYSQL_LIBRARIES})
+
 ##########################################################################
 #
-# Add more libraries to MYSQL_LIBRARIES
+# If not found MySQL Serverv version, compile a small client app
+# and let it write a small cmake file with the settings
+#
+##########################################################################
+
+if(MYSQL_INCLUDE_DIR AND NOT MYSQL_VERSION)
+
+  # Write the C source file that will include the MySQL headers
+  set(GETMYSQLVERSION_SOURCEFILE "${CMAKE_CURRENT_BINARY_DIR}/getmysqlversion.c")
+  file(WRITE "${GETMYSQLVERSION_SOURCEFILE}"
+       "#include <mysql.h>\n"
+       "#include <stdio.h>\n"
+       "int main() {\n"
+       "  printf(\"%s\", MYSQL_SERVER_VERSION);\n"
+       "}\n"
+  )
+
+  # Compile and run the created executable, store output in MYSQL_VERSION
+  try_run(_run_result _compile_result
+    "${CMAKE_BINARY_DIR}"
+    "${GETMYSQLVERSION_SOURCEFILE}"
+    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES:STRING=${MYSQL_INCLUDE_DIR}"
+    RUN_OUTPUT_VARIABLE MYSQL_VERSION
+  )
+
+  if(FINDMYSQL_DEBUG)
+    if(NOT _compile_result)
+      message("DBG: Could not compile \"getmysqlversion.c\"")
+    endif()
+    if(_run_result)
+      message("DBG: Running \"getmysqlversion\" returned ${_run_result}")
+    endif()
+  endif()
+
+endif()
+
+##########################################################################
+#
+# Clean up MYSQL_VERSION and create MYSQL_VERSION_ID/MYSQL_NUM_VERSION
+#
+##########################################################################
+
+if(NOT MYSQL_VERSION)
+  message(FATAL_ERROR "Could not determine the MySQL Server version")
+endif()
+
+# Clean up so only numeric, in case of "-alpha" or similar
+string(REGEX MATCHALL "([0-9]+.[0-9]+.[0-9]+)" MYSQL_VERSION "${MYSQL_VERSION}")
+# To create a fully numeric version, first normalize so N.NN.NN
+string(REGEX REPLACE "[.]([0-9])[.]" ".0\\1." MYSQL_VERSION_ID "${MYSQL_VERSION}")
+string(REGEX REPLACE "[.]([0-9])$"   ".0\\1"  MYSQL_VERSION_ID "${MYSQL_VERSION_ID}")
+# Finally remove the dot
+string(REGEX REPLACE "[.]" "" MYSQL_VERSION_ID "${MYSQL_VERSION_ID}")
+set(MYSQL_NUM_VERSION ${MYSQL_VERSION_ID})
+
+##########################################################################
+#
+# Try determine if to use C++ linkage, and also find C++ flags
+#
+##########################################################################
+
+if(NOT WIN32)
+
+  if(MYSQL_CONFIG_EXECUTABLE)
+
+    if(NOT MYSQL_CFLAGS)
+      _mysql_conf(MYSQL_CFLAGS "--cflags")
+    endif()
+
+    if(NOT MYSQL_CXXFLAGS)
+      if(MYSQL_CXX_LINKAGE OR MYSQL_VERSION_ID GREATER 50603)
+        _mysql_conf(MYSQL_CXXFLAGS "--cxxflags")
+        set(MYSQL_CXX_LINKAGE 1)
+      else()
+        set(MYSQL_CXXFLAGS "${MYSQL_CFLAGS}")
+      endif()
+    endif()
+
+# FIXME this should not be needed, caller of this module should set
+#       it's own flags and just use the library on it's on terms
+#       (change the infe message if enabling this code)
+#   if(NOT MYSQL_LINK_FLAGS)
+#     # Find -mcpu -march -mt -m32 -m64 and other flags starting with "-m"
+#     string(REGEX MATCHALL "(^| )-m([^\r\n ]+)" MYSQL_LINK_FLAGS "${MYSQL_CXXFLAGS}")
+#     string(REGEX REPLACE "^ " ""  MYSQL_LINK_FLAGS "${MYSQL_LINK_FLAGS}")
+#     string(REGEX REPLACE "; " ";" MYSQL_LINK_FLAGS "${MYSQL_LINK_FLAGS}")
+#   endif()
+
+  endif()
+
+endif()
+
+##########################################################################
+#
+# Inform CMake where to look for headers and libraries
 #
 ##########################################################################
 
@@ -715,8 +826,17 @@ endif()
 # set(CMAKE_CXX_FLAGS                "${CMAKE_CXX_FLAGS} ${MYSQL_CXXFLAGS}")
 # set(CMAKE_CXX_FLAGS_${CMAKEBT}     "${CMAKE_CXX_FLAGS_${CMAKEBT}} ${MYSQL_CXXFLAGS}")
 
-include_directories(${MYSQL_INCLUDE_DIR})
-link_directories(${MYSQL_LIB_DIR})
+include_directories("${MYSQL_INCLUDE_DIR}")
+link_directories("${MYSQL_LIB_DIR}")
+
+MESSAGE(STATUS "MYSQL_LIB_DIR_LIST = ${MYSQL_LIB_DIR_LIST}")
+IF(MYSQL_LIB_DIR_LIST)
+  FOREACH(__libpath IN LISTS MYSQL_LIB_DIR_LIST)
+    link_directories("${__libpath}")
+  ENDFOREACH()
+ENDIF()
+
+
 
 ##########################################################################
 #
@@ -744,6 +864,6 @@ message(STATUS "  MYSQL_LINK_FLAGS            : ${MYSQL_LINK_FLAGS}")
 message(STATUS "MySQL client settings that the user can't override")
 
 message(STATUS "  MYSQL_VERSION               : ${MYSQL_VERSION}")
-message(STATUS "  MYSQL_NUM_VERSION           : ${MYSQL_NUM_VERSION}")
+message(STATUS "  MYSQL_VERSION_ID            : ${MYSQL_VERSION_ID}")
 message(STATUS "  MYSQL_LIB                   : ${MYSQL_LIB}")
 message(STATUS "  MYSQL_LIBRARIES             : ${MYSQL_LIBRARIES}")
