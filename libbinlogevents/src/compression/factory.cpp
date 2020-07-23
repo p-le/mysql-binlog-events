@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -20,19 +20,46 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-#ifndef BINARY_LOG_INCLUDED
-#define BINARY_LOG_INCLUDED
+#include <compression/factory.h>
+#include <compression/none.h>
+#include <compression/zstd.h>
+#include <my_byteorder.h>
+#include <algorithm>
 
-/*
-  This file is a convenience header file meant for the users, for inclusion
-  of other related header files. Please refrain from adding any definitions
-  to this header.
-*/
-#include "binlog_event.h"
-#include "control_events.h"
-#include "field_types.h"
-#include "load_data_events.h"
-#include "rows_event.h"
-#include "statement_events.h"
+namespace binary_log {
+namespace transaction {
+namespace compression {
 
-#endif /* BINARY_LOG_INCLUDED */
+std::unique_ptr<Compressor> Factory::build_compressor(type t) {
+  std::unique_ptr<Compressor> res{nullptr};
+  switch (t) {
+    case ZSTD:
+      res = std::make_unique<Zstd_comp>();
+      break;
+    case NONE:
+      res = std::make_unique<None_comp>();
+      break;
+    default:
+      break;
+  }
+  return res;
+}
+
+std::unique_ptr<Decompressor> Factory::build_decompressor(type t) {
+  std::unique_ptr<Decompressor> res{nullptr};
+  switch (t) {
+    case ZSTD:
+      res = std::make_unique<Zstd_dec>();
+      break;
+    case NONE:
+      res = std::make_unique<None_dec>();
+      break;
+    default:
+      break;
+  }
+  return res;
+}
+
+}  // namespace compression
+}  // namespace transaction
+}  // namespace binary_log
